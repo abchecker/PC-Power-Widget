@@ -1,10 +1,10 @@
 # PC Power Widget
 
-A lightweight Windows desktop overlay for monitoring PC load, estimated power use, electricity cost, FPS, date/time, outside temperature, and persistent electricity history.
+A lightweight Windows desktop overlay for monitoring PC load, estimated power use, electricity cost, FPS, hardware temperatures, date/time, outside temperature, and persistent electricity history.
 
 ## Download
 
-**Latest installer ZIP:** [PC_Power_Widget_v1.12.1.zip](https://github.com/abchecker/PC-Power-Widget/releases/download/v1.12.2/PC_Power_Widget_v1.12.2.zip)
+**Latest installer ZIP:** [PC_Power_Widget_v1.12.4.zip](https://github.com/abchecker/PC-Power-Widget/releases/download/v1.12.4/PC_Power_Widget_v1.12.4.zip)
 
 ## What it shows
 
@@ -12,10 +12,11 @@ Compact mode displays:
 
 - FPS
 - CPU usage
-- real CPU temperature
+- real CPU temperature when available
 - GPU usage
 - real GPU temperature
 - RAM usage
+- board/system temperature (`BD`) when a reliable board sensor is identified
 - estimated total PC power draw in watts
 - current electricity cost per hour
 - weekday, date and local time
@@ -35,6 +36,8 @@ The system tray also provides a detailed view and an electricity-history viewer 
    - your town/city for outside temperature, or leave blank to disable weather
    - your PSU wattage if known
 
+The installer checks whether CPU low-level temperature/power sensors are readable. If they are not, it offers to download and install the **official signed PawnIO 2.2.0 driver**. PawnIO is downloaded directly from the upstream GitHub release and SHA256 verified; it is not bundled in this repository.
+
 The widget installs to:
 
 ```text
@@ -53,7 +56,9 @@ It then starts automatically when you sign in to Windows.
 - No visible terminal after startup
 - FPS monitoring through Intel PresentMon
 - CPU/GPU telemetry through LibreHardwareMonitor
-- NVIDIA power fallback through `nvidia-smi` when available
+- Real CPU/GPU temperatures when hardware access is available
+- Board/SuperIO temperature support when a reliable mapping is known
+- NVIDIA power/temperature fallback through `nvidia-smi` when available
 - Persistent local electricity history
 - Automatic monthly rollover on the first day of each month
 - Month, year and all-time electricity totals
@@ -68,6 +73,16 @@ Total wall power is still an **estimate** because normal Windows software cannot
 Estimated values are marked with `~`.
 
 For billing-grade accuracy, use a physical wall power meter.
+
+## Hardware temperatures and PawnIO
+
+Some Windows systems require [PawnIO](https://github.com/namazso/PawnIO) for LibreHardwareMonitor to access CPU package temperature, CPU package power, and SuperIO sensors.
+
+PawnIO does not need to stay open as a desktop application. It is a Windows driver used only when software needs low-level hardware access.
+
+The installer only offers PawnIO if CPU low-level telemetry is unavailable. If you decline it, the rest of PC Power Widget continues to work; unavailable temperatures show `--°C` and unavailable power readings fall back to estimates.
+
+PawnIO is an independent GPL-licensed project and is not covered by this project's MIT license. See [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## FPS
 
@@ -104,10 +119,11 @@ The repository intentionally ignores runtime/user data including:
 
 ## Dependencies
 
-The installer downloads these from their official GitHub releases:
+The installer downloads dependencies from their official upstream releases:
 
 - LibreHardwareMonitor v0.9.6
 - Intel PresentMon v2.5.1
+- PawnIO v2.2.0 — offered only when CPU low-level telemetry is unavailable
 
 Open-Meteo is used for optional geocoding and current outside temperature.
 
@@ -119,14 +135,17 @@ Run:
 %LOCALAPPDATA%\PCPowerWidget\UNINSTALL.bat
 ```
 
-## License
+PawnIO is a shared system driver and is **not** removed by PC Power Widget's uninstaller.
 
-MIT License. See [LICENSE](LICENSE).
-
-
-## v1.12.2
+## v1.12.4
 
 - Real CPU temperature below CPU usage.
 - Real GPU temperature below GPU usage.
-- Temperature text is smaller; compact widget stays 455 × 48.
-- Missing sensors show `--°C`; temperatures are never estimated.
+- Board/system temperature shown as `BD` when a reliable sensor is known.
+- Confirmed sensor mapping for ASUS ROG STRIX B660-A GAMING WIFI D4.
+- Installer detects missing CPU low-level telemetry and can install official signed PawnIO 2.2.0.
+- PawnIO download is SHA256 verified and comes directly from the official upstream release.
+
+## License
+
+MIT License. See [LICENSE](LICENSE).
