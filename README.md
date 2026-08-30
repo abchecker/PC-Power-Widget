@@ -4,7 +4,7 @@ A lightweight Windows desktop overlay for monitoring PC load, estimated power us
 
 ## Download
 
-**Latest installer ZIP:** [PC_Power_Widget_v1.12.1.zip](https://github.com/abchecker/PC-Power-Widget/releases/download/v1.12.1/PC_Power_Widget_v1.12.1.zip)
+**Latest installer ZIP:** [PC_Power_Widget_v1.12.1.zip](https://github.com/abchecker/PC-Power-Widget/releases/download/v1.12.2/PC_Power_Widget_v1.12.2.zip)
 
 ## What it shows
 
@@ -12,7 +12,9 @@ Compact mode displays:
 
 - FPS
 - CPU usage
+- real CPU temperature
 - GPU usage
+- real GPU temperature
 - RAM usage
 - estimated total PC power draw in watts
 - current electricity cost per hour
@@ -120,3 +122,11 @@ Run:
 ## License
 
 MIT License. See [LICENSE](LICENSE).
+
+
+## v1.12.2
+
+- Real CPU temperature below CPU usage.
+- Real GPU temperature below GPU usage.
+- Temperature text is smaller; compact widget stays 455 × 48.
+- Missing sensors show `--°C`; temperatures are never estimated.

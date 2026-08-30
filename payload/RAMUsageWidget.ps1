@@ -751,15 +751,25 @@ function Update-Weather {
                     </Border>
 
                     <Border Grid.Column="1" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
-                        <TextBlock x:Name="CompactCPU" Text="CPU --%" Foreground="White"
-                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
-                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="CompactCPU" Text="CPU --%" Foreground="White"
+                                       FontFamily="Segoe UI" FontWeight="Bold" FontSize="13.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="15"/>
+                            <TextBlock x:Name="CompactCPUTemp" Text="--°C" Foreground="#AFFFFFFF"
+                                       FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="8.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="9"/>
+                        </StackPanel>
                     </Border>
 
                     <Border Grid.Column="2" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
-                        <TextBlock x:Name="CompactGPU" Text="GPU --%" Foreground="White"
-                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
-                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="CompactGPU" Text="GPU --%" Foreground="White"
+                                       FontFamily="Segoe UI" FontWeight="Bold" FontSize="13.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="15"/>
+                            <TextBlock x:Name="CompactGPUTemp" Text="--°C" Foreground="#AFFFFFFF"
+                                       FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="8.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="9"/>
+                        </StackPanel>
                     </Border>
 
                     <Border Grid.Column="3" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
@@ -838,7 +848,9 @@ $compactPanel = $window.FindName("CompactPanel")
 $detailedPanel = $window.FindName("DetailedPanel")
 $compactFPS = $window.FindName("CompactFPS")
 $compactCPU = $window.FindName("CompactCPU")
+$compactCPUTemp = $window.FindName("CompactCPUTemp")
 $compactGPU = $window.FindName("CompactGPU")
+$compactGPUTemp = $window.FindName("CompactGPUTemp")
 $compactRAM = $window.FindName("CompactRAM")
 $compactPower = $window.FindName("CompactPower")
 $compactCost = $window.FindName("CompactCost")
@@ -970,7 +982,7 @@ $fpsItem.Add_CheckedChanged({
 [void]$menu.Items.Add($fpsItem)
 
 $versionItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$versionItem.Text = "Widget version: 1.12.1 SHARE"
+$versionItem.Text = "Widget version: 1.12.2 SHARE"
 $versionItem.Enabled = $false
 [void]$menu.Items.Add($versionItem)
 
@@ -1095,15 +1107,23 @@ $timer.Add_Tick({
     $cpuPowerActual = Get-SensorValue @("Cpu") "Power" @("CPU Package","Package")
     $gpuPowerActual = Get-SensorValue @("GpuNvidia","GpuAmd","GpuIntel") "Power" @("GPU Package","GPU Power","Board Power","Package","Power")
 
-    # NVIDIA fallback: if LHM cannot expose GPU telemetry, use the NVIDIA driver's own nvidia-smi.
-    if ($null -eq $gpuLoad -or $null -eq $gpuPowerActual) {
+    # Real hardware temperatures. Get-SensorValue falls back to the highest
+    # available temperature sensor on that hardware if a preferred package/core
+    # sensor name is not present.
+    $cpuTempActual = Get-SensorValue @("Cpu") "Temperature" @("CPU Package","Package","Core Max","CPU (Tctl/Tdie)","Tctl/Tdie")
+    $gpuTempActual = Get-SensorValue @("GpuNvidia","GpuAmd","GpuIntel") "Temperature" @("GPU Core","Core","GPU Temperature","GPU")
+
+    # NVIDIA fallback: if LHM cannot expose GPU telemetry/temperature,
+    # use the NVIDIA driver's own nvidia-smi.
+    if ($null -eq $gpuLoad -or $null -eq $gpuPowerActual -or $null -eq $gpuTempActual) {
         try {
-            $nv = (& nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
+            $nv = (& nvidia-smi --query-gpu=utilization.gpu,power.draw,temperature.gpu --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
             if ($nv) {
                 $parts = $nv -split ","
-                if ($parts.Count -ge 2) {
+                if ($parts.Count -ge 3) {
                     if ($null -eq $gpuLoad) { $gpuLoad = [double]($parts[0].Trim()) }
                     if ($null -eq $gpuPowerActual) { $gpuPowerActual = [double]($parts[1].Trim()) }
+                    if ($null -eq $gpuTempActual) { $gpuTempActual = [double]($parts[2].Trim()) }
                 }
             }
         } catch {}
@@ -1184,6 +1204,18 @@ $timer.Add_Tick({
     $compactCPU.Text = ("CPU {0:0}%" -f $cpuLoad)
     $compactGPU.Text = ("GPU {0:0}%" -f [double]$gpuLoad)
     $compactRAM.Text = ("RAM {0:0}%" -f $ramLoad)
+
+    if ($null -eq $cpuTempActual) {
+        $compactCPUTemp.Text = "--°C"
+    } else {
+        $compactCPUTemp.Text = ("{0:0}°C" -f [double]$cpuTempActual)
+    }
+
+    if ($null -eq $gpuTempActual) {
+        $compactGPUTemp.Text = "--°C"
+    } else {
+        $compactGPUTemp.Text = ("{0:0}°C" -f [double]$gpuTempActual)
+    }
 
     $cpuBrush = Get-UsageBrush $cpuLoad
     $gpuBrush = Get-UsageBrush ([double]$gpuLoad)
