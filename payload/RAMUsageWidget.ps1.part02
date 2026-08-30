@@ -1,0 +1,260 @@
+}
+
+function Get-SensorValue {
+    param(
+        [string[]]$HardwareTypes,
+        [string]$SensorType,
+        [string[]]$PreferredNames
+    )
+
+    if (-not $script:LhmOK) { return $null }
+
+    $candidates = @()
+    foreach ($hw in (Get-AllHardware)) {
+        $ht = [string]$hw.HardwareType
+        if ($HardwareTypes -notcontains $ht) { continue }
+
+        foreach ($s in $hw.Sensors) {
+            if ([string]$s.SensorType -ne $SensorType) { continue }
+            if ($null -eq $s.Value) { continue }
+            $candidates += $s
+        }
+    }
+
+    if ($candidates.Count -eq 0) { return $null }
+
+    foreach ($wanted in $PreferredNames) {
+        $exact = $candidates | Where-Object { ([string]$_.Name) -ieq $wanted } | Select-Object -First 1
+        if ($exact) { return [double]$exact.Value }
+    }
+
+    foreach ($wanted in $PreferredNames) {
+        $match = $candidates | Where-Object { ([string]$_.Name) -like "*$wanted*" } | Select-Object -First 1
+        if ($match) { return [double]$match.Value }
+    }
+
+    return [double](($candidates | Sort-Object { [double]$_.Value } -Descending | Select-Object -First 1).Value)
+}
+
+# PresentMon FPS capture.
+# v1.10: persistent all-process capture. Prefer foreground renderer;
+# otherwise choose the busiest non-system renderer in the latest sample.
+$script:PresentMonPath = $null
+try {
+    $script:PresentMonPath = (Get-ChildItem (Join-Path $script:AppDir "lib") -Filter "PresentMon-*-x64.exe" -File |
+        Sort-Object Name -Descending | Select-Object -First 1).FullName
+} catch {}
+
+$script:PresentMonProcess = $null
+$script:PresentMonEventId = "RAMUsageWidget.PresentMon"
+$script:FpsHeader = $null
+$script:FpsAppIndex = -1
+$script:FpsPidIndex = -1
+$script:FpsGapIndex = -1
+$script:FpsFrameTimeIndex = -1
+$script:CurrentFps = $null
+$script:FpsSource = ""
+$script:FpsStatus = "Starting"
+$script:FpsLastFrame = [DateTime]::MinValue
+$script:FpsLastStartAttempt = [DateTime]::MinValue
+
+$script:FpsExcludedProcesses = @(
+    "explorer","dwm","SearchHost","StartMenuExperienceHost","ShellExperienceHost",
+    "TextInputHost","ApplicationFrameHost","RuntimeBroker","SystemSettings","Taskmgr",
+    "powershell","pwsh","wscript","cscript","conhost","chrome","msedge","firefox",
+    "steam","steamwebhelper","GameBar","GameBarFTServer","Widgets","WidgetService",
+    "NVIDIA Overlay","NVIDIA Share","nvcontainer","PresentMon"
+)
+
+function Test-FpsAppAllowed([string]$AppName) {
+    if ([string]::IsNullOrWhiteSpace($AppName)) { return $false }
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($AppName)
+    foreach ($x in $script:FpsExcludedProcesses) {
+        if ($base -ieq $x) { return $false }
+    }
+    return $true
+}
+
+function Stop-FpsCapture {
+    try { Unregister-Event -SourceIdentifier $script:PresentMonEventId -ErrorAction SilentlyContinue } catch {}
+    try {
+        if ($script:PresentMonProcess -and -not $script:PresentMonProcess.HasExited) {
+            $script:PresentMonProcess.Kill()
+            $script:PresentMonProcess.WaitForExit(500) | Out-Null
+        }
+    } catch {}
+    try { if ($script:PresentMonProcess) { $script:PresentMonProcess.Dispose() } } catch {}
+
+    $script:PresentMonProcess = $null
+    $script:FpsHeader = $null
+    $script:FpsAppIndex = -1
+    $script:FpsPidIndex = -1
+    $script:FpsGapIndex = -1
+    $script:FpsFrameTimeIndex = -1
+    $script:CurrentFps = $null
+    $script:FpsSource = ""
+    [FpsBridge]::Clear()
+}
+
+function Start-FpsCapture {
+    if (-not [bool]$script:Config.fpsEnabled) { return }
+
+    if ([string]::IsNullOrWhiteSpace($script:PresentMonPath) -or -not (Test-Path $script:PresentMonPath)) {
+        $script:FpsStatus = "PresentMon missing"
+        return
+    }
+
+    Stop-FpsCapture
+    $script:FpsLastStartAttempt = Get-Date
+
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $script:PresentMonPath
+
+        # No PID filter: capture all renderers continuously.
+        $psi.Arguments = "--output_stdout --no_console_stats --no_track_gpu --no_track_input --no_track_display --v1_metrics --session_name RAMUsageWidget.FPS --stop_existing_session"
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+
+        $p = New-Object System.Diagnostics.Process
+        $p.StartInfo = $psi
+        $p.EnableRaisingEvents = $true
+
+        if (-not $p.Start()) {
+            $script:FpsStatus = "Start failed"
+            return
+        }
+
+        $script:PresentMonProcess = $p
+        [FpsBridge]::Clear()
+
+        Register-ObjectEvent -InputObject $p -EventName OutputDataReceived `
+            -SourceIdentifier $script:PresentMonEventId -Action {
+                $line = $event.SourceEventArgs.Data
+                if (-not [string]::IsNullOrWhiteSpace($line)) {
+                    [FpsBridge]::Lines.Enqueue($line)
+                }
+            } | Out-Null
+
+        $p.BeginOutputReadLine()
+        $script:FpsStatus = "Waiting for frames"
+    } catch {
+        $script:FpsStatus = "PresentMon error"
+        Stop-FpsCapture
+    }
+}
+
+function Update-FpsCapture([double]$GpuLoad) {
+    if (-not [bool]$script:Config.fpsEnabled) {
+        if ($script:PresentMonProcess) { Stop-FpsCapture }
+        $script:FpsStatus = "Disabled"
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($script:PresentMonPath) -or -not (Test-Path $script:PresentMonPath)) {
+        $script:CurrentFps = $null
+        $script:FpsStatus = "PresentMon missing"
+        return
+    }
+
+    if ($null -eq $script:PresentMonProcess -or $script:PresentMonProcess.HasExited) {
+        if (((Get-Date) - $script:FpsLastStartAttempt).TotalSeconds -ge 3) {
+            Start-FpsCapture
+        }
+    }
+
+    $foregroundPid = 0
+    try { $foregroundPid = [FpsBridge]::GetForegroundProcessId() } catch {}
+
+    $samples = @{}
+    $names = @{}
+
+    $line = $null
+    while ([FpsBridge]::Lines.TryDequeue([ref]$line)) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+        if ($line.TrimStart().StartsWith("Application,", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $script:FpsHeader = $line -split ","
+            $script:FpsAppIndex = -1
+            $script:FpsPidIndex = -1
+            $script:FpsGapIndex = -1
+            $script:FpsFrameTimeIndex = -1
+
+            for ($i = 0; $i -lt $script:FpsHeader.Count; $i++) {
+                $h = ([string]$script:FpsHeader[$i]).Trim()
+
+                if ($h -ieq "Application") { $script:FpsAppIndex = $i }
+                if ($h -ieq "ProcessID") { $script:FpsPidIndex = $i }
+
+                if ($h -ieq "msBetweenPresents" -or $h -ieq "MsBetweenPresents") {
+                    $script:FpsGapIndex = $i
+                }
+
+                if ($h -ieq "FrameTime") {
+                    $script:FpsFrameTimeIndex = $i
+                }
+            }
+
+            if ($script:FpsPidIndex -ge 0 -and
+                ($script:FpsGapIndex -ge 0 -or $script:FpsFrameTimeIndex -ge 0)) {
+                $script:FpsStatus = "Capturing"
+            } else {
+                $script:FpsStatus = "CSV columns unknown"
+            }
+            continue
+        }
+
+        if ($script:FpsPidIndex -lt 0) { continue }
+        if ($script:FpsGapIndex -lt 0 -and $script:FpsFrameTimeIndex -lt 0) { continue }
+        if ($line.StartsWith("Warning") -or $line.StartsWith("Error")) { continue }
+
+        $parts = $line -split ","
+        if ($parts.Count -le $script:FpsPidIndex) { continue }
+
+        $rowPid = 0
+        if (-not [int]::TryParse($parts[$script:FpsPidIndex].Trim(), [ref]$rowPid)) { continue }
+
+        $app = ""
+        if ($script:FpsAppIndex -ge 0 -and $parts.Count -gt $script:FpsAppIndex) {
+            $app = $parts[$script:FpsAppIndex].Trim()
+        }
+
+        if (-not (Test-FpsAppAllowed $app)) { continue }
+
+        $metricIndex = -1
+        if ($script:FpsGapIndex -ge 0 -and $parts.Count -gt $script:FpsGapIndex) {
+            $metricIndex = $script:FpsGapIndex
+        } elseif ($script:FpsFrameTimeIndex -ge 0 -and $parts.Count -gt $script:FpsFrameTimeIndex) {
+            $metricIndex = $script:FpsFrameTimeIndex
+        }
+
+        if ($metricIndex -lt 0) { continue }
+
+        $gap = 0.0
+        if (-not [double]::TryParse(
+            $parts[$metricIndex],
+            [System.Globalization.NumberStyles]::Float,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [ref]$gap)) {
+            continue
+        }
+
+        if ($gap -le 0.05 -or $gap -ge 1000) { continue }
+
+        if (-not $samples.ContainsKey($rowPid)) {
+            $samples[$rowPid] = New-Object System.Collections.Generic.List[double]
+            $names[$rowPid] = $app
+        }
+
+        $samples[$rowPid].Add($gap)
+    }
+
+    $chosenPid = 0
+
+    if ($foregroundPid -gt 0 -and $samples.ContainsKey($foregroundPid)) {
+        $chosenPid = $foregroundPid
+    } else {
+        $bestCount = 0
