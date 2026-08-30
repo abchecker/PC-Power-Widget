@@ -1,0 +1,260 @@
+                    </Border>
+                </Grid>
+
+                <!-- Tiny detail footer, no extra widget height. -->
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                    <TextBlock x:Name="CompactDate" Text="-- ---" Foreground="#8FFFFFFF"
+                               FontFamily="Segoe UI" FontSize="9.0" FontWeight="SemiBold"/>
+                    <TextBlock Text="  •  " Foreground="#45FFFFFF" FontSize="8.5"/>
+                    <TextBlock x:Name="CompactTime" Text="--:--" Foreground="#AFFFFFFF"
+                               FontFamily="Segoe UI" FontSize="9.0" FontWeight="SemiBold"/>
+                    <TextBlock Text="  •  " Foreground="#45FFFFFF" FontSize="8.5"/>
+                    <TextBlock x:Name="CompactTemp" Text="OUT --°C" Foreground="#AFFFFFFF"
+                               FontFamily="Segoe UI" FontSize="9.0" FontWeight="SemiBold"/>
+                    <TextBlock Text="  •  " Foreground="#45FFFFFF" FontSize="8.5"/>
+                    <TextBlock x:Name="CompactMonthTotal" Text="AUG £0.00" Foreground="#DFFFFFFF"
+                               FontFamily="Segoe UI" FontSize="9.0" FontWeight="Bold"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+        <Border x:Name="DetailedPanel" Visibility="Collapsed" CornerRadius="14" Background="#EA111318" BorderBrush="#30FFFFFF" BorderThickness="1" Padding="16">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="27"/><RowDefinition Height="27"/><RowDefinition Height="27"/><RowDefinition Height="1"/><RowDefinition Height="34"/><RowDefinition Height="25"/><RowDefinition Height="20"/><RowDefinition Height="28"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="CPU" Foreground="#BFFFFFFF" FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                <TextBlock x:Name="CpuLoad" Grid.Row="0" Grid.Column="1" Text="--%" Foreground="White" FontFamily="Consolas" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+                <TextBlock x:Name="CpuW" Grid.Row="0" Grid.Column="2" Text="-- W" Foreground="#DFFFFFFF" FontFamily="Consolas" FontSize="13" TextAlignment="Right" VerticalAlignment="Center"/>
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="GPU" Foreground="#BFFFFFFF" FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                <TextBlock x:Name="GpuLoad" Grid.Row="1" Grid.Column="1" Text="--%" Foreground="White" FontFamily="Consolas" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+                <TextBlock x:Name="GpuW" Grid.Row="1" Grid.Column="2" Text="-- W" Foreground="#DFFFFFFF" FontFamily="Consolas" FontSize="13" TextAlignment="Right" VerticalAlignment="Center"/>
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="RAM" Foreground="#BFFFFFFF" FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                <TextBlock x:Name="RamLoad" Grid.Row="2" Grid.Column="1" Text="--%" Foreground="White" FontFamily="Consolas" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+                <TextBlock x:Name="RamW" Grid.Row="2" Grid.Column="2" Text="~-- W" Foreground="#DFFFFFFF" FontFamily="Consolas" FontSize="13" TextAlignment="Right" VerticalAlignment="Center"/>
+                <Border Grid.Row="3" Grid.ColumnSpan="3" Background="#28FFFFFF"/>
+                <TextBlock Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Text="POWER" Foreground="#BFFFFFFF" FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center"/>
+                <TextBlock x:Name="Power" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Text="~--- W" Foreground="White" FontFamily="Consolas" FontWeight="Bold" FontSize="22" TextAlignment="Right" VerticalAlignment="Center"/>
+                <TextBlock Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Text="NOW" Foreground="#BFFFFFFF" FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center"/>
+                <TextBlock x:Name="CurrentCost" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Text="£0.000 / h" Foreground="White" FontFamily="Consolas" FontWeight="Bold" FontSize="14" TextAlignment="Right" VerticalAlignment="Center"/>
+                <TextBlock x:Name="Rate" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" Text="RATE 26.11p/kWh" Foreground="#8FFFFFFF" FontFamily="Segoe UI" FontSize="11" VerticalAlignment="Center"/>
+                <TextBlock Grid.Row="7" Grid.Column="0" Text="TIME" Foreground="#8FFFFFFF" FontFamily="Segoe UI" FontSize="10" VerticalAlignment="Bottom"/>
+                <TextBlock x:Name="Duration" Grid.Row="7" Grid.Column="1" Text="00:00:00" Foreground="#CFFFFFFF" FontFamily="Consolas" FontSize="12" VerticalAlignment="Bottom"/>
+                <StackPanel Grid.Row="7" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                    <TextBlock Text="TOTAL " Foreground="#8FFFFFFF" FontFamily="Segoe UI" FontSize="10" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="Cost" Text="£0.000" Foreground="White" FontFamily="Consolas" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
+"@
+
+$reader = New-Object System.Xml.XmlNodeReader $xaml
+$window = [Windows.Markup.XamlReader]::Load($reader)
+
+$compactPanel = $window.FindName("CompactPanel")
+$detailedPanel = $window.FindName("DetailedPanel")
+$compactFPS = $window.FindName("CompactFPS")
+$compactCPU = $window.FindName("CompactCPU")
+$compactGPU = $window.FindName("CompactGPU")
+$compactRAM = $window.FindName("CompactRAM")
+$compactPower = $window.FindName("CompactPower")
+$compactCost = $window.FindName("CompactCost")
+$compactDate = $window.FindName("CompactDate")
+$compactTime = $window.FindName("CompactTime")
+$compactTemp = $window.FindName("CompactTemp")
+$compactMonthTotal = $window.FindName("CompactMonthTotal")
+
+$cpuLoadText = $window.FindName("CpuLoad")
+$cpuWText = $window.FindName("CpuW")
+$gpuLoadText = $window.FindName("GpuLoad")
+$gpuWText = $window.FindName("GpuW")
+$ramLoadText = $window.FindName("RamLoad")
+$ramWText = $window.FindName("RamW")
+$powerText = $window.FindName("Power")
+$currentCostText = $window.FindName("CurrentCost")
+$rateText = $window.FindName("Rate")
+$durationText = $window.FindName("Duration")
+$costText = $window.FindName("Cost")
+
+$brushConverter = New-Object System.Windows.Media.BrushConverter
+$script:BrushGreen = $brushConverter.ConvertFromString("#71E38D")
+$script:BrushAmber = $brushConverter.ConvertFromString("#FFC857")
+$script:BrushRed = $brushConverter.ConvertFromString("#FF5F63")
+$script:BrushWhite = $brushConverter.ConvertFromString("#F4F4F4")
+$script:BrushMuted = $brushConverter.ConvertFromString("#A9A9AD")
+
+function Get-UsageBrush([double]$Value) {
+    if ($Value -ge 70) { return $script:BrushRed }
+    if ($Value -ge 50) { return $script:BrushAmber }
+    return $script:BrushGreen
+}
+
+$window.Topmost = [bool]$script:Config.topmost
+$window.Opacity = [double]$script:Config.opacity
+
+function Apply-ViewMode {
+    if ([bool]$script:Config.detailedView) {
+        $compactPanel.Visibility = [System.Windows.Visibility]::Collapsed
+        $detailedPanel.Visibility = [System.Windows.Visibility]::Visible
+        $window.Width = 310
+        $window.Height = 228
+    } else {
+        $detailedPanel.Visibility = [System.Windows.Visibility]::Collapsed
+        $compactPanel.Visibility = [System.Windows.Visibility]::Visible
+        $window.Width = 455
+        $window.Height = 48
+    }
+}
+Apply-ViewMode
+
+if ([double]$script:Config.windowLeft -ge 0 -and [double]$script:Config.windowTop -ge 0) {
+    $window.Left = [double]$script:Config.windowLeft
+    $window.Top = [double]$script:Config.windowTop
+} else {
+    $wa = [System.Windows.SystemParameters]::WorkArea
+    $window.Left = $wa.Right - $window.Width - 22
+    $window.Top = $wa.Top + 22
+}
+
+# Dragging is available only when click-through is OFF.
+$window.Add_MouseLeftButtonDown({
+    if (-not [bool]$script:Config.clickThrough) {
+        try { $window.DragMove() } catch {}
+    }
+})
+$window.Add_MouseLeftButtonUp({
+    if (-not [bool]$script:Config.clickThrough) {
+        $script:Config.windowLeft = [math]::Round($window.Left)
+        $script:Config.windowTop = [math]::Round($window.Top)
+        Save-Config
+    }
+})
+
+# Tray icon and menu.
+$tray = New-Object System.Windows.Forms.NotifyIcon
+$tray.Icon = [System.Drawing.SystemIcons]::Application
+$tray.Text = "RAM Usage Widget"
+$tray.Visible = $true
+
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+
+$showItem = $menu.Items.Add("Hide widget")
+$showItem.Add_Click({
+    if ($window.IsVisible) {
+        $window.Hide()
+        $showItem.Text = "Show widget"
+    } else {
+        $window.Show()
+        $window.Activate()
+        $showItem.Text = "Hide widget"
+    }
+})
+
+$topItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$topItem.Text = "Always on top"
+$topItem.Checked = [bool]$script:Config.topmost
+$topItem.CheckOnClick = $true
+$topItem.Add_CheckedChanged({
+    $window.Topmost = $topItem.Checked
+    $script:Config.topmost = $topItem.Checked
+    Save-Config
+})
+[void]$menu.Items.Add($topItem)
+
+$clickItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$clickItem.Text = "Click-through"
+$clickItem.Checked = [bool]$script:Config.clickThrough
+$clickItem.CheckOnClick = $true
+$clickItem.Add_CheckedChanged({
+    $script:Config.clickThrough = $clickItem.Checked
+    try {
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle
+        [ClickThroughHelper]::SetClickThrough($hwnd, $clickItem.Checked)
+    } catch {}
+    Save-Config
+})
+[void]$menu.Items.Add($clickItem)
+
+$fpsItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$fpsItem.Text = "FPS monitoring"
+$fpsItem.Checked = [bool]$script:Config.fpsEnabled
+$fpsItem.CheckOnClick = $true
+$fpsItem.Add_CheckedChanged({
+    $script:Config.fpsEnabled = $fpsItem.Checked
+    if (-not $fpsItem.Checked) { Stop-FpsCapture }
+    Save-Config
+})
+[void]$menu.Items.Add($fpsItem)
+
+$versionItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$versionItem.Text = "Widget version: 1.12.1 SHARE"
+$versionItem.Enabled = $false
+[void]$menu.Items.Add($versionItem)
+
+$fpsStatusItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$fpsStatusItem.Text = "FPS status: Starting"
+$fpsStatusItem.Enabled = $false
+[void]$menu.Items.Add($fpsStatusItem)
+
+$fpsSourceItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$fpsSourceItem.Text = "FPS source: --"
+$fpsSourceItem.Enabled = $false
+[void]$menu.Items.Add($fpsSourceItem)
+
+$weatherItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$weatherItem.Text = "Outside temperature"
+$weatherItem.Checked = [bool]$script:Config.weatherEnabled
+$weatherItem.CheckOnClick = $true
+$weatherItem.Add_CheckedChanged({
+    $script:Config.weatherEnabled = $weatherItem.Checked
+    if ($weatherItem.Checked) {
+        $script:WeatherLastRequest = [DateTime]::MinValue
+    } else {
+        $script:OutsideTempC = $null
+    }
+    Save-Config
+})
+[void]$menu.Items.Add($weatherItem)
+
+$detailItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$detailItem.Text = "Detailed view"
+$detailItem.Checked = [bool]$script:Config.detailedView
+$detailItem.CheckOnClick = $true
+$detailItem.Add_CheckedChanged({
+    $script:Config.detailedView = $detailItem.Checked
+    Apply-ViewMode
+    Save-Config
+})
+[void]$menu.Items.Add($detailItem)
+
+$historyItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$historyItem.Text = "Electricity history"
+$historyItem.Add_Click({
+    try {
+        $historyScript = Join-Path $script:AppDir "UsageHistory.ps1"
+        if (Test-Path $historyScript) {
+            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -STA -File `"$historyScript`""
+        }
+    } catch {}
+})
+[void]$menu.Items.Add($historyItem)
+
+$opacityMenu = New-Object System.Windows.Forms.ToolStripMenuItem
+$opacityMenu.Text = "Opacity"
+foreach ($pct in @(35,50,65,82,100)) {
+    $item = New-Object System.Windows.Forms.ToolStripMenuItem
+    $item.Text = "$pct%"
+    $item.Tag = $pct
+    $item.Add_Click({
+        param($sender,$e)
+        $v = [double]$sender.Tag / 100.0
+        $window.Opacity = $v
+        $script:Config.opacity = $v
+        Save-Config
+    })
+    [void]$opacityMenu.DropDownItems.Add($item)
+}
+[void]$menu.Items.Add($opacityMenu)
