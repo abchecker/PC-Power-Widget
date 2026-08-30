@@ -1,4 +1,4 @@
-param()
+﻿param()
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
@@ -37,7 +37,7 @@ if (-not [string]::IsNullOrWhiteSpace($psuInput)) {
 }
 
 Write-Host ""
-Write-Host "[1/6] Installing widget files..."
+Write-Host "[1/7] Installing widget files..."
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path $LibDir | Out-Null
 
@@ -87,7 +87,7 @@ $weatherLon = 0.0
 $weatherName = ""
 
 if (-not [string]::IsNullOrWhiteSpace($town)) {
-    Write-Host "[2/6] Finding weather location..."
+    Write-Host "[2/7] Finding weather location..."
     try {
         $encoded = [Uri]::EscapeDataString($town)
         $geo = Invoke-RestMethod -UseBasicParsing -Uri "https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=1&language=en&format=json" -TimeoutSec 8
@@ -104,7 +104,7 @@ if (-not [string]::IsNullOrWhiteSpace($town)) {
         Write-Host "      Weather lookup failed. Weather will be disabled." -ForegroundColor Yellow
     }
 } else {
-    Write-Host "[2/6] Weather disabled."
+    Write-Host "[2/7] Weather disabled."
 }
 
 # Fresh user config. History is deliberately not created here.
@@ -134,7 +134,7 @@ $config = [ordered]@{
 
 $config | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallDir "config.json") -Encoding UTF8
 
-Write-Host "[3/6] Downloading LibreHardwareMonitor v0.9.6..."
+Write-Host "[3/7] Downloading LibreHardwareMonitor v0.9.6..."
 $LhmZip = Join-Path $LibDir "LibreHardwareMonitor.zip"
 $LhmExtract = Join-Path $LibDir "LibreHardwareMonitor"
 $LhmDll = Join-Path $LhmExtract "LibreHardwareMonitorLib.dll"
@@ -150,7 +150,7 @@ if (-not (Test-Path $LhmDll)) {
     Remove-Item $LhmZip -Force
 }
 
-Write-Host "[4/6] Downloading Intel PresentMon v2.5.1..."
+Write-Host "[4/7] Downloading Intel PresentMon v2.5.1..."
 $PresentMon = Join-Path $LibDir "PresentMon-2.5.1-x64.exe"
 $PresentMonUrl = "https://github.com/GameTechDev/PresentMon/releases/download/v2.5.1/PresentMon-2.5.1-x64.exe"
 $PresentMonSha256 = "9bec3083069f58f911e6a512f4806db51a27bd096103087bc1d05ef54c80a191"
@@ -173,7 +173,77 @@ if ($needPm) {
     }
 }
 
-Write-Host "[5/6] Enabling Windows autostart..."
+
+Write-Host "[5/7] Checking CPU hardware sensor access..."
+
+function Test-CpuLowLevelSensors {
+    param([string]$DllPath)
+    if (-not (Test-Path $DllPath)) { return $false }
+    try {
+        Add-Type -Path $DllPath -ErrorAction SilentlyContinue
+        $testComputer = New-Object LibreHardwareMonitor.Hardware.Computer
+        $testComputer.IsCpuEnabled = $true
+        $testComputer.IsMotherboardEnabled = $true
+        $testComputer.IsControllerEnabled = $true
+        $testComputer.Open()
+        foreach ($hw in $testComputer.Hardware) {
+            try { $hw.Update() } catch {}
+            foreach ($sub in $hw.SubHardware) { try { $sub.Update() } catch {} }
+        }
+        Start-Sleep -Milliseconds 600
+        $ok = $false
+        foreach ($hw in $testComputer.Hardware) {
+            if ([string]$hw.HardwareType -eq "Cpu") {
+                try { $hw.Update() } catch {}
+                foreach ($sensor in $hw.Sensors) {
+                    if ([string]$sensor.SensorType -eq "Temperature" -and $null -ne $sensor.Value) { $ok = $true }
+                    if ([string]$sensor.SensorType -eq "Power" -and ([string]$sensor.Name) -like "*Package*" -and
+                        $null -ne $sensor.Value -and [double]$sensor.Value -gt 0.1) { $ok = $true }
+                }
+            }
+        }
+        $testComputer.Close()
+        return $ok
+    } catch { return $false }
+}
+
+$cpuSensorsOk = Test-CpuLowLevelSensors -DllPath $LhmDll
+if (-not $cpuSensorsOk) {
+    Write-Host ""
+    Write-Host "CPU temperature/power sensors are not readable on this PC." -ForegroundColor Yellow
+    Write-Host "PawnIO can provide the low-level hardware access LibreHardwareMonitor needs."
+    Write-Host "PawnIO is an independent GPL-licensed driver from namazso/pawnio.eu."
+    $pawnAnswer = Read-Host "Install official signed PawnIO 2.2.0? [Y/n]"
+    if ([string]::IsNullOrWhiteSpace($pawnAnswer) -or $pawnAnswer.Trim().ToLowerInvariant() -in @("y","yes")) {
+        $PawnIoSetup = Join-Path $env:TEMP "PawnIO_setup_2.2.0.exe"
+        $PawnIoUrl = "https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe"
+        $PawnIoSha256 = "1f519a22e47187f70a1379a48ca604981c4fcf694f4e65b734aaa74a9fba3032"
+        Write-Host "      Downloading official PawnIO 2.2.0..."
+        Invoke-WebRequest -UseBasicParsing -Uri $PawnIoUrl -OutFile $PawnIoSetup
+        $pawnHash = (Get-FileHash $PawnIoSetup -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($pawnHash -ne $PawnIoSha256) {
+            Remove-Item $PawnIoSetup -Force -ErrorAction SilentlyContinue
+            throw "PawnIO download verification failed."
+        }
+        Write-Host "      Installing official signed PawnIO driver..."
+        $pawnProc = Start-Process -FilePath $PawnIoSetup -ArgumentList "-install -silent" -Wait -PassThru
+        $pawnExit = $pawnProc.ExitCode
+        Remove-Item $PawnIoSetup -Force -ErrorAction SilentlyContinue
+        if ($pawnExit -eq 0) {
+            Write-Host "      PawnIO installed." -ForegroundColor Green
+        } elseif ($pawnExit -eq 3010) {
+            Write-Host "      PawnIO installed; Windows restart required for CPU sensors." -ForegroundColor Yellow
+        } else {
+            Write-Host "      PawnIO returned code $pawnExit; widget installation will continue." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "      PawnIO skipped. CPU temperature/power may remain unavailable." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "      CPU low-level sensors already readable. PawnIO not needed."
+}
+
+Write-Host "[6/7] Enabling Windows autostart..."
 $taskName = "PC Power Widget"
 $wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
 $vbs = Join-Path $InstallDir "launch.vbs"
@@ -238,7 +308,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~d
 '@
 $uninstallBat | Set-Content -LiteralPath (Join-Path $InstallDir "UNINSTALL.bat") -Encoding ASCII
 
-Write-Host "[6/6] Starting widget..."
+Write-Host "[7/7] Starting widget..."
 Start-Process -FilePath $wscript -ArgumentList "`"$vbs`""
 
 Write-Host ""

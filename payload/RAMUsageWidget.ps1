@@ -1,4 +1,4 @@
-param()
+﻿param()
 
 $ErrorActionPreference = "SilentlyContinue"
 $script:AppDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -235,6 +235,9 @@ try {
         $script:Computer = New-Object LibreHardwareMonitor.Hardware.Computer
         $script:Computer.IsCpuEnabled = $true
         $script:Computer.IsGpuEnabled = $true
+        $script:Computer.IsMotherboardEnabled = $true
+        $script:Computer.IsControllerEnabled = $true
+        $script:Computer.IsMemoryEnabled = $true
         $script:Computer.Open()
         $script:LhmOK = $true
     }
@@ -294,6 +297,38 @@ function Get-SensorValue {
     }
 
     return [double](($candidates | Sort-Object { [double]$_.Value } -Descending | Select-Object -First 1).Value)
+}
+
+
+function Get-NamedSensorValue {
+    param(
+        [string[]]$HardwareTypes,
+        [string]$SensorType,
+        [string[]]$PreferredNames
+    )
+
+    if (-not $script:LhmOK) { return $null }
+    $candidates = @()
+
+    foreach ($hw in (Get-AllHardware)) {
+        $ht = [string]$hw.HardwareType
+        if ($HardwareTypes -notcontains $ht) { continue }
+        foreach ($sensor in $hw.Sensors) {
+            if ([string]$sensor.SensorType -ne $SensorType) { continue }
+            if ($null -eq $sensor.Value) { continue }
+            $candidates += $sensor
+        }
+    }
+
+    foreach ($wanted in $PreferredNames) {
+        $exact = $candidates | Where-Object { ([string]$_.Name).Trim() -ieq $wanted } | Select-Object -First 1
+        if ($exact) { return [double]$exact.Value }
+    }
+    foreach ($wanted in $PreferredNames) {
+        $match = $candidates | Where-Object { ([string]$_.Name) -like "*$wanted*" } | Select-Object -First 1
+        if ($match) { return [double]$match.Value }
+    }
+    return $null
 }
 
 # PresentMon FPS capture.
@@ -773,9 +808,14 @@ function Update-Weather {
                     </Border>
 
                     <Border Grid.Column="3" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
-                        <TextBlock x:Name="CompactRAM" Text="RAM --%" Foreground="White"
-                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
-                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="CompactRAM" Text="RAM --%" Foreground="White"
+                                       FontFamily="Segoe UI" FontWeight="Bold" FontSize="13.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="15"/>
+                            <TextBlock x:Name="CompactMBTemp" Text="BD --°C" Foreground="#AFFFFFFF"
+                                       FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="8.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="9"/>
+                        </StackPanel>
                     </Border>
 
                     <Border Grid.Column="4" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
@@ -852,6 +892,7 @@ $compactCPUTemp = $window.FindName("CompactCPUTemp")
 $compactGPU = $window.FindName("CompactGPU")
 $compactGPUTemp = $window.FindName("CompactGPUTemp")
 $compactRAM = $window.FindName("CompactRAM")
+$compactMBTemp = $window.FindName("CompactMBTemp")
 $compactPower = $window.FindName("CompactPower")
 $compactCost = $window.FindName("CompactCost")
 $compactDate = $window.FindName("CompactDate")
@@ -982,7 +1023,7 @@ $fpsItem.Add_CheckedChanged({
 [void]$menu.Items.Add($fpsItem)
 
 $versionItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$versionItem.Text = "Widget version: 1.12.2 SHARE"
+$versionItem.Text = "Widget version: 1.12.4 SHARE"
 $versionItem.Enabled = $false
 [void]$menu.Items.Add($versionItem)
 
@@ -1113,6 +1154,34 @@ $timer.Add_Tick({
     $cpuTempActual = Get-SensorValue @("Cpu") "Temperature" @("CPU Package","Package","Core Max","CPU (Tctl/Tdie)","Tctl/Tdie")
     $gpuTempActual = Get-SensorValue @("GpuNvidia","GpuAmd","GpuIntel") "Temperature" @("GPU Core","Core","GPU Temperature","GPU")
 
+
+    # Some systems expose CPU temperature through SuperIO/EC if direct package telemetry is unavailable.
+    if ($null -eq $cpuTempActual) {
+        $cpuTempActual = Get-NamedSensorValue @("Motherboard","SuperIO","EmbeddedController") "Temperature" @(
+            "CPU Package","CPU Core","CPU","CPU Temp","CPU Temperature","CPU Socket","CPU (PECI)","PECI","CPUTIN"
+        )
+    }
+
+    $mbTempActual = Get-NamedSensorValue @("Motherboard","SuperIO","EmbeddedController") "Temperature" @(
+        "Motherboard","Mainboard","System","System 1","System #1","Board","MB","SYSTIN"
+    )
+
+    # Confirmed mapping from a real sensor dump for this exact board.
+    # Nuvoton NCT6798D Temperature #2 is shown as BD (board/system), never as RAM temperature.
+    if ($null -eq $mbTempActual) {
+        $isKnownAsusB660 = $false
+        foreach ($hw in (Get-AllHardware)) {
+            if ([string]$hw.HardwareType -eq "Motherboard" -and
+                ([string]$hw.Name) -ieq "ASUS ROG STRIX B660-A GAMING WIFI D4") {
+                $isKnownAsusB660 = $true
+                break
+            }
+        }
+        if ($isKnownAsusB660) {
+            $mbTempActual = Get-NamedSensorValue @("SuperIO") "Temperature" @("Temperature #2")
+        }
+    }
+
     # NVIDIA fallback: if LHM cannot expose GPU telemetry/temperature,
     # use the NVIDIA driver's own nvidia-smi.
     if ($null -eq $gpuLoad -or $null -eq $gpuPowerActual -or $null -eq $gpuTempActual) {
@@ -1215,6 +1284,12 @@ $timer.Add_Tick({
         $compactGPUTemp.Text = "--°C"
     } else {
         $compactGPUTemp.Text = ("{0:0}°C" -f [double]$gpuTempActual)
+    }
+
+    if ($null -eq $mbTempActual) {
+        $compactMBTemp.Text = "BD --°C"
+    } else {
+        $compactMBTemp.Text = ("BD {0:0}°C" -f [double]$mbTempActual)
     }
 
     $cpuBrush = Get-UsageBrush $cpuLoad
