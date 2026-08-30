@@ -1,0 +1,23 @@
+# User/runtime configuration
+config.json
+usage_history.csv
+LAST_LAUNCHED_VERSION.txt
+
+# Downloaded runtime dependencies
+lib/
+payload/lib/*.dll
+payload/lib/*.exe
+payload/lib/*.zip
+payload/lib/LibreHardwareMonitor/
+
+# Temporary files
+*.tmp
+*.log
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Editors
+.vscode/
+.idea/
