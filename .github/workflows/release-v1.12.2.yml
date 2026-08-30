@@ -1,0 +1,182 @@
+name: Release v1.12.2 CPU GPU temperatures
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch widget with real CPU and GPU temperatures
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('payload/RAMUsageWidget.ps1')
+          s = p.read_text(encoding='utf-8-sig')
+
+          if 'CompactCPUTemp' not in s:
+              old_cpu = '''                    <Border Grid.Column="1" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
+                        <TextBlock x:Name="CompactCPU" Text="CPU --%" Foreground="White"
+                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
+                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                    </Border>'''
+              new_cpu = '''                    <Border Grid.Column="1" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="CompactCPU" Text="CPU --%" Foreground="White"
+                                       FontFamily="Segoe UI" FontWeight="Bold" FontSize="13.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="15"/>
+                            <TextBlock x:Name="CompactCPUTemp" Text="--°C" Foreground="#AFFFFFFF"
+                                       FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="8.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="9"/>
+                        </StackPanel>
+                    </Border>'''
+              assert old_cpu in s, 'CPU compact block not found'
+              s = s.replace(old_cpu, new_cpu, 1)
+
+              old_gpu = '''                    <Border Grid.Column="2" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
+                        <TextBlock x:Name="CompactGPU" Text="GPU --%" Foreground="White"
+                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
+                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                    </Border>'''
+              new_gpu = '''                    <Border Grid.Column="2" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="CompactGPU" Text="GPU --%" Foreground="White"
+                                       FontFamily="Segoe UI" FontWeight="Bold" FontSize="13.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="15"/>
+                            <TextBlock x:Name="CompactGPUTemp" Text="--°C" Foreground="#AFFFFFFF"
+                                       FontFamily="Segoe UI" FontWeight="SemiBold" FontSize="8.5"
+                                       TextAlignment="Center" TextWrapping="NoWrap" LineHeight="9"/>
+                        </StackPanel>
+                    </Border>'''
+              assert old_gpu in s, 'GPU compact block not found'
+              s = s.replace(old_gpu, new_gpu, 1)
+
+              old_refs = '''$compactCPU = $window.FindName("CompactCPU")
+$compactGPU = $window.FindName("CompactGPU")
+$compactRAM = $window.FindName("CompactRAM")'''
+              new_refs = '''$compactCPU = $window.FindName("CompactCPU")
+$compactCPUTemp = $window.FindName("CompactCPUTemp")
+$compactGPU = $window.FindName("CompactGPU")
+$compactGPUTemp = $window.FindName("CompactGPUTemp")
+$compactRAM = $window.FindName("CompactRAM")'''
+              assert old_refs in s, 'compact refs not found'
+              s = s.replace(old_refs, new_refs, 1)
+
+              old_sensor = '''    $cpuPowerActual = Get-SensorValue @("Cpu") "Power" @("CPU Package","Package")
+    $gpuPowerActual = Get-SensorValue @("GpuNvidia","GpuAmd","GpuIntel") "Power" @("GPU Package","GPU Power","Board Power","Package","Power")
+
+    # NVIDIA fallback: if LHM cannot expose GPU telemetry, use the NVIDIA driver's own nvidia-smi.
+    if ($null -eq $gpuLoad -or $null -eq $gpuPowerActual) {
+        try {
+            $nv = (& nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
+            if ($nv) {
+                $parts = $nv -split ","
+                if ($parts.Count -ge 2) {
+                    if ($null -eq $gpuLoad) { $gpuLoad = [double]($parts[0].Trim()) }
+                    if ($null -eq $gpuPowerActual) { $gpuPowerActual = [double]($parts[1].Trim()) }
+                }
+            }
+        } catch {}
+    }'''
+              new_sensor = '''    $cpuPowerActual = Get-SensorValue @("Cpu") "Power" @("CPU Package","Package")
+    $gpuPowerActual = Get-SensorValue @("GpuNvidia","GpuAmd","GpuIntel") "Power" @("GPU Package","GPU Power","Board Power","Package","Power")
+
+    # Real hardware temperatures. If a preferred package/core sensor name is
+    # unavailable, Get-SensorValue uses the highest real temperature sensor
+    # exposed by that hardware. Temperatures are never estimated.
+    $cpuTempActual = Get-SensorValue @("Cpu") "Temperature" @("CPU Package","Package","Core Max","CPU (Tctl/Tdie)","Tctl/Tdie")
+    $gpuTempActual = Get-SensorValue @("GpuNvidia","GpuAmd","GpuIntel") "Temperature" @("GPU Core","Core","GPU Temperature","GPU")
+
+    # NVIDIA fallback for telemetry and real GPU temperature.
+    if ($null -eq $gpuLoad -or $null -eq $gpuPowerActual -or $null -eq $gpuTempActual) {
+        try {
+            $nv = (& nvidia-smi --query-gpu=utilization.gpu,power.draw,temperature.gpu --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
+            if ($nv) {
+                $parts = $nv -split ","
+                if ($parts.Count -ge 3) {
+                    if ($null -eq $gpuLoad) { $gpuLoad = [double]($parts[0].Trim()) }
+                    if ($null -eq $gpuPowerActual) { $gpuPowerActual = [double]($parts[1].Trim()) }
+                    if ($null -eq $gpuTempActual) { $gpuTempActual = [double]($parts[2].Trim()) }
+                }
+            }
+        } catch {}
+    }'''
+              assert old_sensor in s, 'sensor block not found'
+              s = s.replace(old_sensor, new_sensor, 1)
+
+              old_ui = '''    $compactCPU.Text = ("CPU {0:0}%" -f $cpuLoad)
+    $compactGPU.Text = ("GPU {0:0}%" -f [double]$gpuLoad)
+    $compactRAM.Text = ("RAM {0:0}%" -f $ramLoad)
+
+    $cpuBrush = Get-UsageBrush $cpuLoad'''
+              new_ui = '''    $compactCPU.Text = ("CPU {0:0}%" -f $cpuLoad)
+    $compactGPU.Text = ("GPU {0:0}%" -f [double]$gpuLoad)
+    $compactRAM.Text = ("RAM {0:0}%" -f $ramLoad)
+
+    if ($null -eq $cpuTempActual) {
+        $compactCPUTemp.Text = "--°C"
+    } else {
+        $compactCPUTemp.Text = ("{0:0}°C" -f [double]$cpuTempActual)
+    }
+
+    if ($null -eq $gpuTempActual) {
+        $compactGPUTemp.Text = "--°C"
+    } else {
+        $compactGPUTemp.Text = ("{0:0}°C" -f [double]$gpuTempActual)
+    }
+
+    $cpuBrush = Get-UsageBrush $cpuLoad'''
+              assert old_ui in s, 'compact UI block not found'
+              s = s.replace(old_ui, new_ui, 1)
+
+          s = re.sub(r'Widget version: [0-9.]+(?: SHARE)?', 'Widget version: 1.12.2 SHARE', s)
+          p.write_text(s, encoding='utf-8-sig')
+
+          readme = Path('README.md')
+          r = readme.read_text(encoding='utf-8')
+          if '- real CPU and GPU temperatures' not in r:
+              r = r.replace('- CPU usage\n- GPU usage', '- CPU usage\n- real CPU temperature\n- GPU usage\n- real GPU temperature')
+          r = r.replace('releases/download/v1.12.1/PC_Power_Widget_v1.12.1.zip', 'releases/download/v1.12.2/PC_Power_Widget_v1.12.2.zip')
+          if '## v1.12.2' not in r:
+              r += '\n\n## v1.12.2\n\n- Real CPU temperature shown below CPU usage in compact mode.\n- Real GPU temperature shown below GPU usage in compact mode.\n- Temperature text uses a smaller font and the widget remains 455 × 48.\n- Missing sensors show `--°C`; temperatures are never estimated.\n'
+          readme.write_text(r, encoding='utf-8')
+          PY
+
+      - name: Verify source
+        run: |
+          grep -q 'CompactCPUTemp' payload/RAMUsageWidget.ps1
+          grep -q 'CompactGPUTemp' payload/RAMUsageWidget.ps1
+          grep -q 'temperature.gpu' payload/RAMUsageWidget.ps1
+          grep -q 'Widget version: 1.12.2 SHARE' payload/RAMUsageWidget.ps1
+
+      - name: Commit v1.12.2 source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add payload/RAMUsageWidget.ps1 README.md
+          git commit -m "v1.12.2: show real CPU and GPU temperatures"
+          git push
+
+      - name: Build install ZIP
+        run: |
+          zip -r PC_Power_Widget_v1.12.2.zip INSTALL.bat INSTALL.ps1 payload README.md LICENSE -x 'payload/lib/*'
+
+      - name: Create v1.12.2 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.12.2 PC_Power_Widget_v1.12.2.zip \
+            --title "PC Power Widget v1.12.2" \
+            --notes "Adds real CPU and GPU temperatures under their usage percentages in the compact 455x48 widget. Temperature text is smaller. Missing sensors show --°C; values are not estimated."
