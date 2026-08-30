@@ -2,6 +2,10 @@
 
 A lightweight Windows desktop overlay for monitoring PC load, estimated power use, electricity cost, FPS, date/time, outside temperature, and persistent electricity history.
 
+## Download
+
+**Latest installer ZIP:** [PC_Power_Widget_v1.12.1.zip](https://github.com/abchecker/PC-Power-Widget/releases/download/v1.12.1/PC_Power_Widget_v1.12.1.zip)
+
 ## What it shows
 
 Compact mode displays:
