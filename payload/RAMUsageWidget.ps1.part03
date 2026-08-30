@@ -1,0 +1,260 @@
+        foreach ($pidKey in $samples.Keys) {
+            $count = $samples[$pidKey].Count
+            if ($count -gt $bestCount) {
+                $bestCount = $count
+                $chosenPid = [int]$pidKey
+            }
+        }
+    }
+
+    if ($chosenPid -gt 0 -and $samples.ContainsKey($chosenPid)) {
+        $list = $samples[$chosenPid]
+
+        if ($list.Count -ge 2) {
+            $sum = 0.0
+            foreach ($g in $list) { $sum += $g }
+
+            if ($sum -gt 0) {
+                $fps = 1000.0 * $list.Count / $sum
+                if ($fps -gt 999) { $fps = 999 }
+
+                $script:CurrentFps = $fps
+                $script:FpsSource = [System.IO.Path]::GetFileNameWithoutExtension([string]$names[$chosenPid])
+                $script:FpsLastFrame = Get-Date
+                $script:FpsStatus = "OK"
+            }
+        }
+    } else {
+        if ($script:FpsLastFrame -ne [DateTime]::MinValue -and
+            ((Get-Date) - $script:FpsLastFrame).TotalSeconds -gt 2) {
+            $script:CurrentFps = $null
+            $script:FpsSource = ""
+        }
+
+        if ($script:PresentMonProcess -and -not $script:PresentMonProcess.HasExited) {
+            if ($script:FpsHeader -eq $null) {
+                $script:FpsStatus = "Waiting for CSV"
+            } else {
+                $script:FpsStatus = "No game frames"
+            }
+        }
+    }
+}
+
+# Persistent electricity history.
+# Stored as one CSV row per calendar day.
+$script:HistoryPath = Join-Path $script:AppDir "usage_history.csv"
+$script:HistoryRows = @{}
+$script:HistoryDirty = $false
+$script:HistoryLastSave = Get-Date
+
+function Load-UsageHistory {
+    $script:HistoryRows = @{}
+
+    if (-not (Test-Path $script:HistoryPath)) { return }
+
+    try {
+        foreach ($row in (Import-Csv -LiteralPath $script:HistoryPath)) {
+            if ([string]::IsNullOrWhiteSpace([string]$row.Date)) { continue }
+
+            $script:HistoryRows[[string]$row.Date] = [pscustomobject]@{
+                Date = [string]$row.Date
+                KWh = [double]$row.KWh
+                CostGBP = [double]$row.CostGBP
+                Seconds = [double]$row.Seconds
+            }
+        }
+    } catch {
+        $script:HistoryRows = @{}
+    }
+}
+
+function Save-UsageHistory {
+    if (-not $script:HistoryDirty) { return }
+
+    try {
+        $output = @()
+
+        foreach ($key in ($script:HistoryRows.Keys | Sort-Object)) {
+            $row = $script:HistoryRows[$key]
+
+            $output += [pscustomobject]@{
+                Date = [string]$row.Date
+                KWh = ("{0:0.000000}" -f [double]$row.KWh)
+                CostGBP = ("{0:0.000000}" -f [double]$row.CostGBP)
+                Seconds = ("{0:0.0}" -f [double]$row.Seconds)
+            }
+        }
+
+        $tmp = "$script:HistoryPath.tmp"
+        $output | Export-Csv -LiteralPath $tmp -NoTypeInformation -Encoding UTF8
+        Move-Item -LiteralPath $tmp -Destination $script:HistoryPath -Force
+
+        $script:HistoryDirty = $false
+        $script:HistoryLastSave = Get-Date
+    } catch {}
+}
+
+function Add-UsageHistorySample {
+    param(
+        [DateTime]$Now,
+        [double]$WallW,
+        [double]$Seconds,
+        [double]$RateGBP
+    )
+
+    if ($Seconds -le 0 -or $WallW -lt 0) { return }
+
+    $key = $Now.ToString("yyyy-MM-dd")
+
+    if (-not $script:HistoryRows.ContainsKey($key)) {
+        $script:HistoryRows[$key] = [pscustomobject]@{
+            Date = $key
+            KWh = 0.0
+            CostGBP = 0.0
+            Seconds = 0.0
+        }
+    }
+
+    $row = $script:HistoryRows[$key]
+    $energyKWh = ($WallW / 1000.0) * ($Seconds / 3600.0)
+
+    $row.KWh = [double]$row.KWh + $energyKWh
+    $row.CostGBP = [double]$row.CostGBP + ($energyKWh * $RateGBP)
+    $row.Seconds = [double]$row.Seconds + $Seconds
+
+    $script:HistoryDirty = $true
+}
+
+function Get-HistoryTotals {
+    param([string]$Prefix)
+
+    $kwh = 0.0
+    $cost = 0.0
+    $seconds = 0.0
+
+    foreach ($key in $script:HistoryRows.Keys) {
+        if ([string]::IsNullOrEmpty($Prefix) -or $key.StartsWith($Prefix)) {
+            $row = $script:HistoryRows[$key]
+            $kwh += [double]$row.KWh
+            $cost += [double]$row.CostGBP
+            $seconds += [double]$row.Seconds
+        }
+    }
+
+    return [pscustomobject]@{
+        KWh = $kwh
+        CostGBP = $cost
+        Seconds = $seconds
+    }
+}
+
+Load-UsageHistory
+
+# Outside weather: async, so a slow internet request never freezes the widget.
+$script:OutsideTempC = $null
+$script:WeatherTask = $null
+$script:WeatherLastRequest = [DateTime]::MinValue
+$script:WeatherClient = [System.Net.Http.HttpClient]::new()
+$script:WeatherClient.Timeout = [TimeSpan]::FromSeconds(5)
+
+function Update-Weather {
+    if (-not [bool]$script:Config.weatherEnabled) {
+        $script:OutsideTempC = $null
+        return
+    }
+
+    # Collect completed request.
+    if ($script:WeatherTask -ne $null -and $script:WeatherTask.IsCompleted) {
+        try {
+            if (-not $script:WeatherTask.IsFaulted -and -not $script:WeatherTask.IsCanceled) {
+                $json = $script:WeatherTask.Result
+                $obj = $json | ConvertFrom-Json
+                if ($obj.current -and $null -ne $obj.current.temperature_2m) {
+                    $script:OutsideTempC = [double]$obj.current.temperature_2m
+                }
+            }
+        } catch {}
+        $script:WeatherTask = $null
+    }
+
+    # Refresh only every N minutes.
+    $mins = [double]$script:Config.weatherRefreshMinutes
+    if ($mins -lt 1) { $mins = 10 }
+
+    if ($script:WeatherTask -eq $null -and
+        ((Get-Date) - $script:WeatherLastRequest).TotalMinutes -ge $mins) {
+        try {
+            $lat = [double]$script:Config.weatherLat
+            $lon = [double]$script:Config.weatherLon
+            $url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m&timezone=Europe%2FLondon"
+            $script:WeatherTask = $script:WeatherClient.GetStringAsync($url)
+            $script:WeatherLastRequest = Get-Date
+        } catch {
+            $script:WeatherTask = $null
+            $script:WeatherLastRequest = Get-Date
+        }
+    }
+}
+
+# WPF UI
+[xml]$xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="455" Height="48"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True">
+    <Grid>
+        <Border x:Name="CompactPanel" CornerRadius="12" Background="#EA111318"
+                BorderBrush="#30FFFFFF" BorderThickness="1" Padding="12,1">
+            <Grid Height="44" VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="29"/>
+                    <RowDefinition Height="15"/>
+                </Grid.RowDefinitions>
+
+                <!-- Main metrics: 431px usable inner width. -->
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="62"/>
+                        <ColumnDefinition Width="72"/>
+                        <ColumnDefinition Width="72"/>
+                        <ColumnDefinition Width="75"/>
+                        <ColumnDefinition Width="66"/>
+                        <ColumnDefinition Width="84"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
+                        <TextBlock x:Name="CompactFPS" Text="FPS --" Foreground="White"
+                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
+                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                    </Border>
+
+                    <Border Grid.Column="1" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
+                        <TextBlock x:Name="CompactCPU" Text="CPU --%" Foreground="White"
+                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
+                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                    </Border>
+
+                    <Border Grid.Column="2" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
+                        <TextBlock x:Name="CompactGPU" Text="GPU --%" Foreground="White"
+                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
+                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                    </Border>
+
+                    <Border Grid.Column="3" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
+                        <TextBlock x:Name="CompactRAM" Text="RAM --%" Foreground="White"
+                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
+                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                    </Border>
+
+                    <Border Grid.Column="4" BorderBrush="#2CFFFFFF" BorderThickness="0,0,1,0">
+                        <TextBlock x:Name="CompactPower" Text="~---W" Foreground="White"
+                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="14"
+                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+                    </Border>
+
+                    <Border Grid.Column="5">
+                        <TextBlock x:Name="CompactCost" Text="£0.000/h" Foreground="White"
+                                   FontFamily="Segoe UI" FontWeight="Bold" FontSize="13.5"
+                                   TextAlignment="Center" VerticalAlignment="Center" TextWrapping="NoWrap"/>
